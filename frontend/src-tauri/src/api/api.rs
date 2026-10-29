@@ -1431,6 +1431,9 @@ pub async fn api_set_tray_monitoring_settings<R: Runtime>(
 
 
 use base64::Engine as _;
+use tauri::{Manager, Emitter};
+use crate::database::repositories::meeting::MeetingsRepository;
+use crate::database::repositories::summary::SummaryProcessesRepository;
 
 fn parse_time_to_seconds(t: &str) -> f64 {
     let parts: Vec<&str> = t.split(':').collect();
@@ -1582,13 +1585,16 @@ pub async fn api_transcribe_with_gemini<R: Runtime>(
             let time_str = seg["time"].as_str().unwrap_or("00:00");
             let start_sec = parse_time_to_seconds(time_str);
 
+            let formatted_text = if let Some(ref spk) = speaker {
+                format!("{}: {}", spk, text)
+            } else {
+                text
+            };
+
             transcripts_to_save.push(TranscriptSegment {
                 id: format!("seg_{}", idx),
-                text,
-                start_time: Some(time_str.to_string()),
-                end_time: None,
-                confidence: Some(0.95),
-                speaker,
+                text: formatted_text,
+                timestamp: time_str.to_string(),
                 audio_start_time: Some(start_sec),
                 audio_end_time: Some(start_sec + 3.0),
                 duration: Some(3.0),
@@ -1600,10 +1606,7 @@ pub async fn api_transcribe_with_gemini<R: Runtime>(
         transcripts_to_save.push(TranscriptSegment {
             id: "seg_0".to_string(),
             text: raw_transcript,
-            start_time: Some("00:00".to_string()),
-            end_time: None,
-            confidence: Some(0.95),
-            speaker: Some("Falante".to_string()),
+            timestamp: "00:00".to_string(),
             audio_start_time: Some(0.0),
             audio_end_time: Some(10.0),
             duration: Some(10.0),
@@ -1621,11 +1624,11 @@ pub async fn api_transcribe_with_gemini<R: Runtime>(
     .map_err(|e| format!("Erro ao salvar reunião: {}", e))?;
 
     // 7. Update tags in meetings table
-    let _ = MeetingRepository::update_meeting_tags(pool, &meeting_id, &tags_json).await;
+    let _ = MeetingsRepository::update_meeting_tags(pool, &meeting_id, &tags_json).await;
 
     // 8. Save summary to summary_processes
     let now = chrono::Utc::now();
-    let _ = crate::database::repositories::summary::SummaryProcessesRepository::insert_process_state(
+    let _ = SummaryProcessesRepository::create_or_reset_process(
         pool,
         &meeting_id,
         now,
@@ -1638,7 +1641,7 @@ pub async fn api_transcribe_with_gemini<R: Runtime>(
         }
     });
 
-    let _ = crate::database::repositories::summary::SummaryProcessesRepository::update_process_completed(
+    let _ = SummaryProcessesRepository::update_process_completed(
         pool,
         &meeting_id,
         now,

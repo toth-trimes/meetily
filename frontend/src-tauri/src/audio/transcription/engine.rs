@@ -58,8 +58,8 @@ pub struct GeminiTranscriptionProvider {
 impl TranscriptionProvider for GeminiTranscriptionProvider {
     async fn transcribe(
         &self,
-        _audio: &[f32],
-        _language: Option<&str>,
+        _audio: Vec<f32>,
+        _language: Option<String>,
     ) -> Result<crate::audio::transcription::provider::TranscriptResult, crate::audio::transcription::provider::TranscriptionError> {
         Ok(crate::audio::transcription::provider::TranscriptResult {
             text: String::new(),
@@ -76,7 +76,7 @@ impl TranscriptionProvider for GeminiTranscriptionProvider {
         Some(self.model.clone())
     }
 
-    fn provider_name(&self) -> &str {
+    fn provider_name(&self) -> &'static str {
         "Gemini (Cloud)"
     }
 }
@@ -170,10 +170,9 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
         }
         "gemini" => {
             info!("🔍 Validating Gemini provider configuration...");
-            let setting_repo = crate::database::repositories::setting::SettingRepository::new(
-                app.state::<crate::database::DatabaseManager>().inner().clone(),
-            );
-            match setting_repo.get_transcript_api_key("gemini").await {
+            let app_state = app.state::<crate::state::AppState>();
+            let pool = app_state.db_manager.pool();
+            match crate::database::repositories::setting::SettingsRepository::get_transcript_api_key(pool, "gemini").await {
                 Ok(Some(key)) if !key.trim().is_empty() => {
                     info!("✅ Gemini API key is configured");
                     Ok(())

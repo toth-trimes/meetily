@@ -23,8 +23,8 @@ pub fn start_tray_monitor<R: Runtime>(app: AppHandle<R>) {
         loop {
             tokio::time::sleep(Duration::from_secs(3)).await;
 
-            let pool = match app.try_state::<crate::database::DatabaseManager>() {
-                Some(db) => db.pool().clone(),
+            let pool = match app.try_state::<crate::state::AppState>() {
+                Some(state) => state.db_manager.pool().clone(),
                 None => continue,
             };
 
