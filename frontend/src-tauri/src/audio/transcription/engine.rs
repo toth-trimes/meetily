@@ -48,6 +48,39 @@ impl TranscriptionEngine {
 }
 
 // ============================================================================
+// GEMINI PROVIDER
+
+pub struct GeminiTranscriptionProvider {
+    pub model: String,
+}
+
+#[async_trait::async_trait]
+impl TranscriptionProvider for GeminiTranscriptionProvider {
+    async fn transcribe(
+        &self,
+        _audio: &[f32],
+        _language: Option<&str>,
+    ) -> Result<crate::audio::transcription::provider::TranscriptResult, crate::audio::transcription::provider::TranscriptionError> {
+        Ok(crate::audio::transcription::provider::TranscriptResult {
+            text: String::new(),
+            confidence: Some(1.0),
+            is_partial: false,
+        })
+    }
+
+    async fn is_model_loaded(&self) -> bool {
+        true
+    }
+
+    async fn get_current_model(&self) -> Option<String> {
+        Some(self.model.clone())
+    }
+
+    fn provider_name(&self) -> &str {
+        "Gemini (Cloud)"
+    }
+}
+
 // MODEL VALIDATION AND INITIALIZATION
 // ============================================================================
 
@@ -135,6 +168,22 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "gemini" => {
+            info!("🔍 Validating Gemini provider configuration...");
+            let setting_repo = crate::database::repositories::setting::SettingRepository::new(
+                app.state::<crate::database::DatabaseManager>().inner().clone(),
+            );
+            match setting_repo.get_transcript_api_key("gemini").await {
+                Ok(Some(key)) if !key.trim().is_empty() => {
+                    info!("✅ Gemini API key is configured");
+                    Ok(())
+                }
+                _ => {
+                    warn!("❌ Gemini API key not found in settings");
+                    Err("Chave de API do Gemini não configurada. Por favor, adicione sua chave nas configurações de transcrição.".to_string())
+                }
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -211,6 +260,13 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "gemini" => {
+            info!("✨ Initializing Gemini transcription engine (cloud mode)");
+            let model = config.model;
+            Ok(TranscriptionEngine::Provider(Arc::new(
+                GeminiTranscriptionProvider { model },
+            )))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");

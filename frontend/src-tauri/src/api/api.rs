@@ -30,6 +30,7 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    pub tags: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -123,6 +124,7 @@ pub struct MeetingDetails {
     pub created_at: String,
     pub updated_at: String,
     pub transcripts: Vec<MeetingTranscript>,
+    pub tags: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -341,6 +343,7 @@ pub async fn api_get_meetings<R: Runtime>(
                 .map(|m| Meeting {
                     id: m.id,
                     title: m.title,
+                    tags: m.tags,
                 })
                 .collect();
             Ok(result)
@@ -1380,4 +1383,326 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
             }
         }
     }
+}
+
+#[tauri::command]
+pub async fn api_update_meeting_tags<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    tags: String,
+) -> Result<bool, String> {
+    let pool = state.db_manager.pool();
+    MeetingsRepository::update_meeting_tags(pool, &meeting_id, &tags)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_get_tray_monitoring_settings<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let pool = state.db_manager.pool();
+    let enabled = SettingsRepository::get_tray_monitoring_enabled(pool).await.unwrap_or(true);
+    let countdown = SettingsRepository::get_auto_record_countdown(pool).await.unwrap_or(5);
+    Ok(serde_json::json!({
+        "trayMonitoringEnabled": enabled,
+        "autoRecordCountdown": countdown,
+    }))
+}
+
+#[tauri::command]
+pub async fn api_set_tray_monitoring_settings<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    tray_monitoring_enabled: bool,
+    auto_record_countdown: i64,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    SettingsRepository::set_tray_monitoring_enabled(pool, tray_monitoring_enabled)
+        .await
+        .map_err(|e| e.to_string())?;
+    SettingsRepository::set_auto_record_countdown(pool, auto_record_countdown)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+
+use base64::Engine as _;
+
+fn parse_time_to_seconds(t: &str) -> f64 {
+    let parts: Vec<&str> = t.split(':').collect();
+    if parts.len() == 2 {
+        let mins: f64 = parts[0].parse().unwrap_or(0.0);
+        let secs: f64 = parts[1].parse().unwrap_or(0.0);
+        mins * 60.0 + secs
+    } else {
+        0.0
+    }
+}
+
+#[tauri::command]
+pub async fn api_transcribe_with_gemini<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    folder_path: Option<String>,
+    meeting_name: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log_info!("api_transcribe_with_gemini called with folder_path: {:?}", folder_path);
+    let pool = state.db_manager.pool();
+
+    // 1. Get Gemini API key
+    let api_key = match SettingsRepository::get_transcript_api_key(pool, "gemini").await {
+        Ok(Some(k)) if !k.trim().is_empty() => k,
+        _ => return Err("Chave de API do Gemini não configurada.".to_string()),
+    };
+
+    let folder = folder_path.ok_or_else(|| "Caminho da pasta da reunião não fornecido.".to_string())?;
+    let path = std::path::Path::new(&folder);
+    let audio_file = path.join("audio.mp4");
+    if !audio_file.exists() {
+        return Err(format!("Arquivo de áudio não encontrado em {:?}", audio_file));
+    }
+
+    // 2. Read audio file
+    let audio_bytes = std::fs::read(&audio_file).map_err(|e| format!("Falha ao ler áudio: {}", e))?;
+    let b64_audio = base64::engine::general_purpose::STANDARD.encode(&audio_bytes);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Falha ao criar cliente HTTP: {}", e))?;
+
+    // 3. Step 1: Transcribe with gemini-3.5-transcribe
+    let transcribe_url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent?key={}",
+        api_key
+    );
+    let payload1 = serde_json::json!({
+        "contents": [{
+            "parts": [
+                {"text": "Transcreva o áudio em português."},
+                {"inline_data": {"mime_type": "audio/mp4", "data": b64_audio}}
+            ]
+        }]
+    });
+
+    log_info!("Enviando áudio para gemini-3.5-transcribe...");
+    let res1 = client.post(&transcribe_url)
+        .json(&payload1)
+        .send()
+        .await
+        .map_err(|e| format!("Erro na requisição para gemini-3.5-transcribe: {}", e))?;
+
+    if !res1.status().is_success() {
+        let err_text = res1.text().await.unwrap_or_default();
+        log_error!("Erro da API do Gemini Transcribe: {}", err_text);
+        return Err(format!("Erro da API do Gemini Transcribe: {}", err_text));
+    }
+
+    let data1: serde_json::Value = res1.json().await.map_err(|e| format!("Falha ao processar resposta do Gemini: {}", e))?;
+    let raw_transcript = data1.pointer("/candidates/0/content/parts/0/audioTranscription/text")
+        .and_then(|v| v.as_str())
+        .or_else(|| data1.pointer("/candidates/0/content/parts/0/text").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+
+    log_info!("Transcrição bruta obtida: {} caracteres", raw_transcript.len());
+
+    // 4. Step 2: Diarization, Summary & Tags with fallback models
+    let prompt = format!(
+        "Você é o assistente inteligente de reuniões do Meetily. Com base no áudio e na transcrição abaixo, realize as seguintes tarefas:\n1. Separe a transcrição em falas/turnos identificando os interlocutores ('Você', 'Cliente', ou 'Falante 1', etc.) e timestamps estimados no formato MM:SS.\n2. Escreva um resumo executivo claro e profissional em português com seções como **Resumo**, **Decisões** e **Itens de Ação**.\n3. Extraia entre 2 e 5 tags curtas que categorizem o assunto desta reunião (ex: ['Comercial', 'Planejamento']).\n\nResponda estritamente em JSON com a estrutura:\n{{\n  \"segments\": [\n    {{\"speaker\": \"Falante 1\", \"time\": \"00:00\", \"text\": \"...\"}}\n  ],\n  \"summary_markdown\": \"**Resumo**\\n...\\n\\n**Decisões**\\n...\\n\\n**Itens de Ação**\\n...\",\n  \"tags\": [\"Tag1\", \"Tag2\"]\n}}\n\nTranscrição bruta:\n{}",
+        raw_transcript
+    );
+
+    let payload2 = serde_json::json!({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"response_mime_type": "application/json"}
+    });
+
+    let fallback_models = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
+    let mut structured_result: Option<serde_json::Value> = None;
+
+    for model_name in fallback_models {
+        log_info!("Tentando estruturação e resumo com modelo {}...", model_name);
+        let summary_url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model_name, api_key
+        );
+        match client.post(&summary_url).json(&payload2).send().await {
+            Ok(res) if res.status().is_success() => {
+                if let Ok(data2) = res.json::<serde_json::Value>().await {
+                    if let Some(text_json) = data2.pointer("/candidates/0/content/parts/0/text").and_then(|v| v.as_str()) {
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text_json) {
+                            structured_result = Some(parsed);
+                            log_info!("Sucesso com modelo {}!", model_name);
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok(res) => {
+                let status = res.status();
+                let err_text = res.text().await.unwrap_or_default();
+                log_warn!("Modelo {} retornou {}: {}", model_name, status, err_text);
+            }
+            Err(e) => {
+                log_warn!("Erro ao chamar {}: {}", model_name, e);
+            }
+        }
+    }
+
+    let parsed_res = structured_result.unwrap_or_else(|| {
+        serde_json::json!({
+            "segments": [
+                {"speaker": "Falante", "time": "00:00", "text": raw_transcript}
+            ],
+            "summary_markdown": format!("**Resumo da Reunião**\n\n{}", raw_transcript),
+            "tags": ["Reunião", "Geral"]
+        })
+    });
+
+    let summary_markdown = parsed_res["summary_markdown"].as_str().unwrap_or("").to_string();
+    let tags_array = parsed_res["tags"].as_array().cloned().unwrap_or_default();
+    let tags_vec: Vec<String> = tags_array.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+    let tags_json = serde_json::to_string(&tags_vec).unwrap_or_else(|_| "[]".to_string());
+
+    // 5. Convert segments to TranscriptSegment
+    let mut transcripts_to_save: Vec<TranscriptSegment> = Vec::new();
+    let segments_arr = parsed_res["segments"].as_array();
+    let title = meeting_name.unwrap_or_else(|| "Reunião".to_string());
+
+    if let Some(segs) = segments_arr {
+        for (idx, seg) in segs.iter().enumerate() {
+            let text = seg["text"].as_str().unwrap_or("").to_string();
+            let speaker = seg["speaker"].as_str().map(|s| s.to_string());
+            let time_str = seg["time"].as_str().unwrap_or("00:00");
+            let start_sec = parse_time_to_seconds(time_str);
+
+            transcripts_to_save.push(TranscriptSegment {
+                id: format!("seg_{}", idx),
+                text,
+                start_time: Some(time_str.to_string()),
+                end_time: None,
+                confidence: Some(0.95),
+                speaker,
+                audio_start_time: Some(start_sec),
+                audio_end_time: Some(start_sec + 3.0),
+                duration: Some(3.0),
+            });
+        }
+    }
+
+    if transcripts_to_save.is_empty() {
+        transcripts_to_save.push(TranscriptSegment {
+            id: "seg_0".to_string(),
+            text: raw_transcript,
+            start_time: Some("00:00".to_string()),
+            end_time: None,
+            confidence: Some(0.95),
+            speaker: Some("Falante".to_string()),
+            audio_start_time: Some(0.0),
+            audio_end_time: Some(10.0),
+            duration: Some(10.0),
+        });
+    }
+
+    // 6. Save transcript & meeting to database
+    let meeting_id = TranscriptsRepository::save_transcript(
+        pool,
+        &title,
+        &transcripts_to_save,
+        Some(folder.clone()),
+    )
+    .await
+    .map_err(|e| format!("Erro ao salvar reunião: {}", e))?;
+
+    // 7. Update tags in meetings table
+    let _ = MeetingRepository::update_meeting_tags(pool, &meeting_id, &tags_json).await;
+
+    // 8. Save summary to summary_processes
+    let now = chrono::Utc::now();
+    let _ = crate::database::repositories::summary::SummaryProcessesRepository::insert_process_state(
+        pool,
+        &meeting_id,
+        now,
+    ).await;
+
+    let summary_result_obj = serde_json::json!({
+        "markdown": summary_markdown,
+        "english_cache": {
+            "markdown": summary_markdown
+        }
+    });
+
+    let _ = crate::database::repositories::summary::SummaryProcessesRepository::update_process_completed(
+        pool,
+        &meeting_id,
+        now,
+        summary_result_obj,
+        1,
+        15.0,
+    ).await;
+
+    // 9. Write transcripts.json to disk for completeness
+    let transcripts_disk_payload = serde_json::json!({
+        "last_updated": chrono::Utc::now().to_rfc3339(),
+        "segments": transcripts_to_save
+    });
+    let _ = std::fs::write(path.join("transcripts.json"), serde_json::to_string_pretty(&transcripts_disk_payload).unwrap_or_default());
+
+    log_info!("Reunião {} salva com sucesso via Gemini com {} tags!", meeting_id, tags_vec.len());
+
+    Ok(serde_json::json!({
+        "meeting_id": meeting_id,
+        "tags": tags_vec
+    }))
+}
+
+#[tauri::command]
+pub async fn api_tray_prompt_action<R: Runtime>(
+    app: AppHandle<R>,
+    action: String,
+    send_to_ai: Option<bool>,
+) -> Result<(), String> {
+    log_info!("api_tray_prompt_action: action={}, send_to_ai={:?}", action, send_to_ai);
+
+    if let Some(win) = app.get_webview_window("prompt") {
+        let _ = win.hide();
+    }
+
+    match action.as_str() {
+        "start" => {
+            log_info!("Prompt action: starting recording");
+            if let Some(main_win) = app.get_webview_window("main") {
+                let _ = main_win.show();
+                let _ = main_win.set_focus();
+                let _ = main_win.eval("sessionStorage.setItem('autoStartRecording', 'true'); window.location.assign('/');");
+            }
+        }
+        "stop" => {
+            log_info!("Prompt action: stopping recording");
+            let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+            let save_path = data_dir.join(format!("recording-{}.wav", timestamp));
+
+            let _ = crate::audio::recording_commands::stop_recording(
+                app.clone(),
+                crate::audio::recording_commands::RecordingArgs {
+                    save_path: save_path.to_string_lossy().to_string(),
+                },
+            ).await;
+
+            let call_api = send_to_ai.unwrap_or(true);
+            let _ = app.emit("recording-stop-complete", call_api);
+        }
+        _ => {
+            log_info!("Prompt action: dismissed");
+        }
+    }
+
+    Ok(())
 }

@@ -19,6 +19,19 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true
+            },
+            {
+                "label": "prompt",
+                "title": "Meetily Prompt",
+                "url": "/prompt",
+                "width": 380,
+                "height": 220,
+                "resizable": false,
+                "decorations": false,
+                "alwaysOnTop": true,
+                "skipTaskbar": true,
+                "transparent": true,
+                "visible": false
             }
         ],
         "macOSPrivateApi": true,
@@ -27,7 +40,7 @@
                 "default-src": "'self'",
                 "style-src": "'self' 'unsafe-inline'",
                 "img-src": "'self' asset: https://asset.localhost data:",
-                "connect-src": "'self' http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
+                "connect-src": "'self' http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai https://generativelanguage.googleapis.com"
             },
             "assetProtocol": {
                 "enable": true,
@@ -40,7 +53,8 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "prompt"
                     ],
                     "permissions": [
                         "fs:default",

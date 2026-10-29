@@ -36,6 +36,7 @@ interface SidebarItem {
   id: string;
   title: string;
   type: 'folder' | 'file';
+  tags?: string | null;
   children?: SidebarItem[];
 }
 
@@ -63,6 +64,38 @@ const Sidebar: React.FC = () => {
   const { betaFeatures } = useConfig();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    meetings.forEach((m: any) => {
+      if (m.tags) {
+        try {
+          const parsed = JSON.parse(m.tags);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((t: string) => tagSet.add(t));
+          }
+        } catch {
+          m.tags.split(',').map((t: string) => t.trim()).filter(Boolean).forEach((t: string) => tagSet.add(t));
+        }
+      }
+    });
+    return Array.from(tagSet);
+  }, [meetings]);
+
+  const itemMatchesTag = (tagsStr?: string | null, tagToMatch?: string | null) => {
+    if (!tagToMatch) return true;
+    if (!tagsStr) return false;
+    try {
+      const parsed = JSON.parse(tagsStr);
+      if (Array.isArray(parsed)) {
+        return parsed.includes(tagToMatch);
+      }
+    } catch {
+      return tagsStr.split(',').map((t: string) => t.trim()).includes(tagToMatch);
+    }
+    return false;
+  };
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
@@ -257,7 +290,18 @@ const Sidebar: React.FC = () => {
 
   // Combine search results with sidebar items
   const filteredSidebarItems = useMemo(() => {
-    if (!searchQuery.trim()) return sidebarItems;
+    if (!searchQuery.trim() && !selectedTag) return sidebarItems;
+    if (!searchQuery.trim() && selectedTag) {
+      return sidebarItems.map(folder => {
+        if (folder.type === 'folder' && folder.children) {
+          return {
+            ...folder,
+            children: folder.children.filter(item => itemMatchesTag(item.tags, selectedTag))
+          };
+        }
+        return itemMatchesTag(folder.tags, selectedTag) ? folder : undefined;
+      }).filter((item): item is SidebarItem => item !== undefined);
+    }
 
     // If we have search results, highlight matching meetings
     if (searchResults.length > 0) {
@@ -275,6 +319,7 @@ const Sidebar: React.FC = () => {
               // Include if the meeting ID is in our search results
               if (matchedMeetingIds.has(item.id)) return true;
 
+              if (selectedTag && !itemMatchesTag(item.tags, selectedTag)) return false;
               // Or if the title matches the search query
               return item.title.toLowerCase().includes(searchQuery.toLowerCase());
             });
@@ -299,10 +344,11 @@ const Sidebar: React.FC = () => {
           if (folder.type === 'folder') {
             if (!folder.children) return folder;
 
-            // Filter children based on search query
-            const filteredChildren = folder.children.filter(item =>
-              item.title.toLowerCase().includes(searchQuery.toLowerCase())
-            );
+            // Filter children based on search query and selected tag
+            const filteredChildren = folder.children.filter(item => {
+              if (selectedTag && !itemMatchesTag(item.tags, selectedTag)) return false;
+              return item.title.toLowerCase().includes(searchQuery.toLowerCase());
+            });
 
             return {
               ...folder,
@@ -315,7 +361,7 @@ const Sidebar: React.FC = () => {
         })
         .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
     }
-  }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
+  }, [sidebarItems, searchQuery, searchResults, expandedFolders, selectedTag]);
 
 
   const handleDelete = async (itemId: string) => {
@@ -615,7 +661,25 @@ const Sidebar: React.FC = () => {
                     <Plus className="w-3.5 h-3.5 text-blue-600" />
                   </div>
                 )}
-                <span className="flex-1 break-words">{item.title}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="break-words block">{item.title}</span>
+                  {isMeetingItem && item.tags && (
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {(() => {
+                        try {
+                          const parsed = JSON.parse(item.tags);
+                          return Array.isArray(parsed) ? parsed : [];
+                        } catch {
+                          return item.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+                        }
+                      })().map((tag: string) => (
+                        <span key={tag} className="text-[9px] px-1.5 py-0.2 rounded bg-blue-50 text-blue-600 border border-blue-100 font-normal">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {isMeetingItem && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <button
@@ -713,6 +777,30 @@ const Sidebar: React.FC = () => {
                     }
                   </InputGroup>
                 </div>
+                {/* Tag Filter Pills */}
+                {allTags.length > 0 && (
+                  <div className="flex gap-1 overflow-x-auto py-1 scrollbar-none no-scrollbar">
+                    <button
+                      onClick={() => setSelectedTag(null)}
+                      className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap transition-colors ${
+                        selectedTag === null ? 'bg-blue-600 text-white font-medium' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Todos
+                    </button>
+                    {allTags.map(tag => (
+                      <button
+                        key={tag}
+                        onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap transition-colors ${
+                          selectedTag === tag ? 'bg-blue-600 text-white font-medium' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

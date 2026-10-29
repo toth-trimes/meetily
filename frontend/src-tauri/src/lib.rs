@@ -52,6 +52,7 @@ pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
+pub mod tray_monitor;
 pub mod utils;
 pub mod whisper_engine;
 
@@ -510,6 +511,7 @@ pub fn run() {
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
             }
+            tray_monitor::start_tray_monitor(_app.handle().clone());
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
@@ -724,6 +726,8 @@ pub fn run() {
             // api::api_save_auto_generate_setting,
             api::api_get_transcript_config,
             api::api_save_transcript_config,
+            api::api_transcribe_with_gemini,
+            api::api_tray_prompt_action,
             api::api_get_transcript_api_key,
             api::api_delete_meeting,
             api::api_get_meeting,
@@ -739,6 +743,9 @@ pub fn run() {
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,
             api::api_test_custom_openai_connection,
+            api::api_update_meeting_tags,
+            api::api_get_tray_monitoring_settings,
+            api::api_set_tray_monitoring_settings,
             // Summary commands
             summary::commands::api_process_transcript,
             summary::commands::api_get_summary,

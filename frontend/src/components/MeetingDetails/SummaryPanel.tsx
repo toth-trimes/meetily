@@ -9,7 +9,9 @@ import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown } from 'lucide-react';
+import { Languages, ChevronDown, Tag, Plus, X } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -88,6 +90,71 @@ export function SummaryPanel({
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
+  // Tags management
+  const { refetchMeetings } = useSidebar();
+  const [tagsList, setTagsList] = useState<string[]>(() => {
+    try {
+      if (meeting.tags) {
+        const parsed = JSON.parse(meeting.tags);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch {}
+    return [];
+  });
+  const [isAddingTag, setIsAddingTag] = useState(false);
+  const [newTagInput, setNewTagInput] = useState('');
+
+  useEffect(() => {
+    try {
+      if (meeting.tags) {
+        const parsed = JSON.parse(meeting.tags);
+        setTagsList(Array.isArray(parsed) ? parsed : []);
+      } else {
+        setTagsList([]);
+      }
+    } catch {
+      setTagsList([]);
+    }
+  }, [meeting.id, meeting.tags]);
+
+  const saveUpdatedTags = async (updated: string[]) => {
+    setTagsList(updated);
+    try {
+      await invoke('api_update_meeting_tags', {
+        meetingId: meeting.id,
+        tags: JSON.stringify(updated),
+      });
+      await refetchMeetings();
+      toast.success('Assuntos atualizados com sucesso!');
+    } catch (e) {
+      console.error('Failed to update tags:', e);
+      toast.error('Erro ao atualizar assuntos');
+    }
+  };
+
+  const handleAddTag = async () => {
+    const trimmed = newTagInput.trim().replace(/^#/, '');
+    if (!trimmed) {
+      setIsAddingTag(false);
+      return;
+    }
+    if (tagsList.includes(trimmed)) {
+      toast.info('Este assunto já foi adicionado.');
+      setNewTagInput('');
+      setIsAddingTag(false);
+      return;
+    }
+    const updated = [...tagsList, trimmed];
+    setNewTagInput('');
+    setIsAddingTag(false);
+    await saveUpdatedTags(updated);
+  };
+
+  const handleRemoveTag = async (tagToRemove: string) => {
+    const updated = tagsList.filter((t) => t !== tagToRemove);
+    await saveUpdatedTags(updated);
+  };
+
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -275,6 +342,68 @@ export function SummaryPanel({
                 onCopy={onCopySummary}
               />
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* Meeting Subject Tags Bar */}
+      <div className="px-6 py-2 bg-slate-50/80 border-b border-gray-200/80 flex items-center justify-between gap-3 text-xs flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Tag className="w-3.5 h-3.5 text-gray-500" />
+          <span className="text-gray-500 font-medium mr-1">Assuntos:</span>
+          {tagsList.length === 0 && !isAddingTag && (
+            <span className="text-gray-400 italic">Nenhum assunto definido</span>
+          )}
+          {tagsList.map((tag, idx) => (
+            <span
+              key={idx}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200/60"
+            >
+              #{tag}
+              <button
+                onClick={() => handleRemoveTag(tag)}
+                className="text-blue-400 hover:text-blue-700 p-0.5 rounded-full hover:bg-blue-100 transition-colors"
+                title="Remover assunto"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+          {isAddingTag ? (
+            <div className="inline-flex items-center gap-1">
+              <input
+                type="text"
+                value={newTagInput}
+                onChange={(e) => setNewTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddTag();
+                  if (e.key === 'Escape') setIsAddingTag(false);
+                }}
+                placeholder="Novo assunto..."
+                autoFocus
+                className="px-2 py-0.5 text-xs rounded border border-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-500 w-28 bg-white"
+              />
+              <button
+                onClick={handleAddTag}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium px-1"
+              >
+                Adicionar
+              </button>
+              <button
+                onClick={() => setIsAddingTag(false)}
+                className="text-xs text-gray-500 hover:text-gray-700 px-1"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsAddingTag(true)}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-gray-600 hover:text-blue-600 hover:bg-gray-100 border border-dashed border-gray-300 transition-colors"
+            >
+              <Plus className="w-3 h-3" />
+              Adicionar Assunto
+            </button>
           )}
         </div>
       </div>

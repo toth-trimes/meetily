@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -144,6 +145,57 @@ export function useRecordingStop(
       // Note: stop_recording is already called by RecordingControls.stopRecordingAction
       // This function only handles post-stop processing (transcription wait, API call, navigation)
       console.log('Recording already stopped by RecordingControls, processing transcription...');
+
+      // Check if provider is Gemini for cloud transcription & summary
+      let transcriptConfig: any = null;
+      try {
+        transcriptConfig = await invoke('api_get_transcript_config');
+      } catch (e) {
+        console.warn('Failed to get transcript config:', e);
+      }
+
+      if (transcriptConfig?.provider === 'gemini') {
+        const folderPath = sessionStorage.getItem('last_recording_folder_path');
+        const savedMeetingName = sessionStorage.getItem('last_recording_meeting_name') || meetingTitle || 'Nova Reunião';
+
+        if (isCallApi && folderPath) {
+          setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Transcrevendo e resumindo com Google Gemini...');
+          try {
+            const res = await invoke<{ meeting_id: string; tags: string[] }>('api_transcribe_with_gemini', {
+              folderPath,
+              meetingName: savedMeetingName,
+            });
+            const meetingId = res.meeting_id;
+
+            await markMeetingAsSaved();
+            sessionStorage.removeItem('last_recording_folder_path');
+            sessionStorage.removeItem('last_recording_meeting_name');
+            sessionStorage.removeItem('indexeddb_current_meeting_id');
+
+            await refetchMeetings();
+            setCurrentMeeting({ id: meetingId, title: savedMeetingName });
+            setStatus(RecordingStatus.COMPLETED);
+
+            toast.success('Reunião gravada e transcrita com Gemini!', {
+              description: `Tags: ${(res.tags || []).join(', ')}`,
+              duration: 5000,
+            });
+
+            setTimeout(() => {
+              router.push(`/meeting-details?id=${meetingId}&source=recording`);
+              clearTranscripts();
+              Analytics.trackPageView('meeting_details');
+              setStatus(RecordingStatus.IDLE);
+            }, 1000);
+            return;
+          } catch (geminiError) {
+            console.error('Gemini post-recording failed:', geminiError);
+            toast.error('Erro na transcrição Gemini', {
+              description: String(geminiError),
+            });
+          }
+        }
+      }
 
       // Wait for transcription to complete
       setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Waiting for transcription...');

@@ -9,6 +9,7 @@ pub struct MeetingModel {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub folder_path: Option<String>,
+    pub tags: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
@@ -96,6 +97,15 @@ pub struct Setting {
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]
     pub custom_openai_config: Option<String>,
+    #[sqlx(rename = "geminiApiKey")]
+    #[serde(rename = "geminiApiKey")]
+    pub gemini_api_key: Option<String>,
+    #[sqlx(rename = "trayMonitoringEnabled")]
+    #[serde(rename = "trayMonitoringEnabled")]
+    pub tray_monitoring_enabled: Option<i64>,
+    #[sqlx(rename = "autoRecordCountdown")]
+    #[serde(rename = "autoRecordCountdown")]
+    pub auto_record_countdown: Option<i64>,
 }
 
 impl Setting {
@@ -127,4 +137,7 @@ pub struct TranscriptSetting {
     #[sqlx(rename = "openaiApiKey")]
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
+    #[sqlx(rename = "geminiApiKey")]
+    #[serde(rename = "geminiApiKey")]
+    pub gemini_api_key: Option<String>,
 }

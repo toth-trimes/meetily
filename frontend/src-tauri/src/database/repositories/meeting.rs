@@ -62,7 +62,7 @@ impl MeetingsRepository {
 
         // Get meeting details
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path, tags FROM meetings WHERE id = ?")
                 .bind(meeting_id)
                 .fetch_optional(&mut *transaction)
                 .await?;
@@ -101,6 +101,7 @@ impl MeetingsRepository {
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 transcripts: meeting_transcripts,
+                tags: meeting.tags,
             }))
         } else {
             transaction.rollback().await?;
@@ -109,6 +110,22 @@ impl MeetingsRepository {
     }
 
     /// Get meeting metadata without transcripts (for pagination)
+    
+    pub async fn update_meeting_tags(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        tags: &str,
+    ) -> Result<bool, SqlxError> {
+        let now = Utc::now();
+        let result = sqlx::query("UPDATE meetings SET tags = ?, updated_at = ? WHERE id = ?")
+            .bind(tags)
+            .bind(now.to_rfc3339())
+            .bind(meeting_id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn get_meeting_metadata(
         pool: &SqlitePool,
         meeting_id: &str,
@@ -120,7 +137,7 @@ impl MeetingsRepository {
         }
 
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path, tags FROM meetings WHERE id = ?")
                 .bind(meeting_id)
                 .fetch_optional(pool)
                 .await?;

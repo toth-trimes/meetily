@@ -85,6 +85,7 @@ impl SettingsRepository {
             "ollama" => "ollamaApiKey",
             "groq" => "groqApiKey",
             "openrouter" => "openRouterApiKey",
+            "gemini" => "geminiApiKey",
             "builtin-ai" => return Ok(()), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -123,6 +124,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
+            "gemini" => "geminiApiKey",
             "builtin-ai" => return Ok(None), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -184,6 +186,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "gemini" => "geminiApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -216,6 +219,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "gemini" => "geminiApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -249,6 +253,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
+            "gemini" => "geminiApiKey",
             "builtin-ai" => return Ok(()), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -343,6 +348,46 @@ impl SettingsRepository {
         .execute(pool)
         .await?;
 
+        Ok(())
+    }
+
+    pub async fn get_tray_monitoring_enabled(
+        pool: &SqlitePool,
+    ) -> std::result::Result<bool, sqlx::Error> {
+        let val: Option<i64> = sqlx::query_scalar("SELECT trayMonitoringEnabled FROM settings WHERE id = '1' LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
+        Ok(val.map(|v| v != 0).unwrap_or(true))
+    }
+
+    pub async fn set_tray_monitoring_enabled(
+        pool: &SqlitePool,
+        enabled: bool,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query("UPDATE settings SET trayMonitoringEnabled = $1 WHERE id = '1'")
+            .bind(if enabled { 1i64 } else { 0i64 })
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_auto_record_countdown(
+        pool: &SqlitePool,
+    ) -> std::result::Result<i64, sqlx::Error> {
+        let val: Option<i64> = sqlx::query_scalar("SELECT autoRecordCountdown FROM settings WHERE id = '1' LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
+        Ok(val.unwrap_or(5))
+    }
+
+    pub async fn set_auto_record_countdown(
+        pool: &SqlitePool,
+        seconds: i64,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query("UPDATE settings SET autoRecordCountdown = $1 WHERE id = '1'")
+            .bind(seconds)
+            .execute(pool)
+            .await?;
         Ok(())
     }
 }
