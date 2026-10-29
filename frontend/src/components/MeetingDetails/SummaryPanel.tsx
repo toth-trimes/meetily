@@ -29,6 +29,8 @@ interface SummaryPanelProps {
     id: string;
     title: string;
     created_at: string;
+    tags?: string | null;
+    [key: string]: any;
   };
   meetingTitle: string;
   isSummaryDirty: boolean;
@@ -92,10 +94,11 @@ export function SummaryPanel({
   const [langPickerOpen, setLangPickerOpen] = useState(false);
   // Tags management
   const { refetchMeetings } = useSidebar();
+  const rawMeetingTags = (meeting as any).tags;
   const [tagsList, setTagsList] = useState<string[]>(() => {
     try {
-      if (meeting.tags) {
-        const parsed = JSON.parse(meeting.tags);
+      if (rawMeetingTags) {
+        const parsed = JSON.parse(rawMeetingTags);
         return Array.isArray(parsed) ? parsed : [];
       }
     } catch {}
@@ -106,8 +109,9 @@ export function SummaryPanel({
 
   useEffect(() => {
     try {
-      if (meeting.tags) {
-        const parsed = JSON.parse(meeting.tags);
+      const currentTags = (meeting as any).tags;
+      if (currentTags) {
+        const parsed = JSON.parse(currentTags);
         setTagsList(Array.isArray(parsed) ? parsed : []);
       } else {
         setTagsList([]);
@@ -115,7 +119,7 @@ export function SummaryPanel({
     } catch {
       setTagsList([]);
     }
-  }, [meeting.id, meeting.tags]);
+  }, [meeting.id, (meeting as any).tags]);
 
   const saveUpdatedTags = async (updated: string[]) => {
     setTagsList(updated);
