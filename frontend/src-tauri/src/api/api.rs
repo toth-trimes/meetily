@@ -1432,7 +1432,6 @@ pub async fn api_set_tray_monitoring_settings<R: Runtime>(
 
 use base64::Engine as _;
 use tauri::{Manager, Emitter};
-use crate::database::repositories::meeting::MeetingsRepository;
 use crate::database::repositories::summary::SummaryProcessesRepository;
 
 fn parse_time_to_seconds(t: &str) -> f64 {
