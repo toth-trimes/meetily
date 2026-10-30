@@ -515,6 +515,11 @@ pub fn run() {
 
             // Ensure main window is shown and focused on startup
             tray::focus_main_window(_app.handle());
+            let app_handle_for_focus = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+                tray::focus_main_window(&app_handle_for_focus);
+            });
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");

@@ -205,28 +205,52 @@ while ($true) {
 }
 
 pub fn show_prompt_window<R: Runtime>(app: &AppHandle<R>, mode: &str, app_name: &str, countdown: i64) {
-    if let Some(win) = app.get_webview_window("prompt") {
-        let _ = win.emit("show-prompt", serde_json::json!({
-            "mode": mode,
-            "appName": app_name,
-            "autoRecordCountdown": countdown,
-        }));
-
-        if let Some(monitor) = win.current_monitor().ok().flatten().or_else(|| win.primary_monitor().ok().flatten()) {
-            let screen_size = monitor.size();
-            let scale_factor = monitor.scale_factor();
-            let win_w = (380.0 * scale_factor) as i32;
-            let win_h = (180.0 * scale_factor) as i32;
-            let margin_x = (24.0 * scale_factor) as i32;
-            let margin_y = (64.0 * scale_factor) as i32;
-
-            let x = (screen_size.width as i32) - win_w - margin_x;
-            let y = (screen_size.height as i32) - win_h - margin_y;
-
-            let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+    let win = if let Some(w) = app.get_webview_window("prompt") {
+        w
+    } else {
+        match tauri::WebviewWindowBuilder::new(
+            app,
+            "prompt",
+            tauri::WebviewUrl::App("/prompt".into()),
+        )
+        .title("Meetily Prompt")
+        .inner_size(380.0, 220.0)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .transparent(true)
+        .visible(false)
+        .build()
+        {
+            Ok(w) => w,
+            Err(e) => {
+                log::error!("Failed to create prompt window: {}", e);
+                return;
+            }
         }
+    };
 
-        let _ = win.show();
-        let _ = win.set_focus();
+    let _ = win.emit("show-prompt", serde_json::json!({
+        "mode": mode,
+        "appName": app_name,
+        "autoRecordCountdown": countdown,
+    }));
+
+    if let Some(monitor) = win.current_monitor().ok().flatten().or_else(|| win.primary_monitor().ok().flatten()) {
+        let screen_size = monitor.size();
+        let scale_factor = monitor.scale_factor();
+        let win_w = (380.0 * scale_factor) as i32;
+        let win_h = (180.0 * scale_factor) as i32;
+        let margin_x = (24.0 * scale_factor) as i32;
+        let margin_y = (64.0 * scale_factor) as i32;
+
+        let x = (screen_size.width as i32) - win_w - margin_x;
+        let y = (screen_size.height as i32) - win_h - margin_y;
+
+        let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
+
+    let _ = win.show();
+    let _ = win.set_focus();
 }

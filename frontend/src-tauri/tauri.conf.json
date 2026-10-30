@@ -20,20 +20,8 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true,
+                "center": true,
                 "visible": true
-            },
-            {
-                "label": "prompt",
-                "title": "Meetily Prompt",
-                "url": "/prompt",
-                "width": 380,
-                "height": 220,
-                "resizable": false,
-                "decorations": false,
-                "alwaysOnTop": true,
-                "skipTaskbar": true,
-                "transparent": true,
-                "visible": false
             }
         ],
         "macOSPrivateApi": true,

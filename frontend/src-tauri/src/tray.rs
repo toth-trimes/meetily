@@ -27,17 +27,18 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .icon(app.default_window_icon().unwrap().clone())
         .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            }
-            | TrayIconEvent::DoubleClick {
-                button: MouseButton::Left,
-                ..
-            } = event
-            {
-                focus_main_window(tray.app_handle());
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    ..
+                }
+                | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    focus_main_window(tray.app_handle());
+                }
+                _ => {}
             }
         })
         .build(app)?;
@@ -414,21 +415,13 @@ pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
     });
 
     if let Some(window) = window {
-        if let Err(e) = window.unminimize() {
-            log::error!("Failed to unminimize main window: {}", e);
-        }
-
-        if let Err(e) = window.show() {
-            log::error!("Failed to show main window: {}", e);
-        }
-
-        if let Err(e) = window.set_focus() {
-            log::error!("Failed to focus main window: {}", e);
-        }
-
-        if let Err(e) = window.eval("window.focus()") {
-            log::error!("Failed to focus main webview: {}", e);
-        }
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.center();
+        let _ = window.set_focus();
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_always_on_top(false);
+        let _ = window.eval("window.focus()");
     } else {
         log::warn!("Could not find main window");
     }
